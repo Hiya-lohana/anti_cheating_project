@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isSameOrganization(orgId) {
+      return isAuthenticated() && getUserData().organizationId == orgId;
+    }
+
+    // Organizations collection
+    match /organizations/{orgId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && getUserData().organizationId == orgId && getUserData().role == 'instructor';
+    }
+
+    // Teachers / Instructors collection
+    match /teachers/{teacherId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == teacherId;
+    }
+
+    // Students collection
+    match /students/{studentId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == studentId;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Tests collection - Multi-Organization Enforced
+    match /tests/{testId} {
+      // Students and Instructors can ONLY read tests belonging to their own organization
+      allow read: if isAuthenticated() && 
+        (resource.data.organizationId == getUserData().organizationId);
+
+      // Instructors can create tests for their own organization
+      allow create: if isAuthenticated() && 
+        getUserData().role == 'instructor' && 
+        request.resource.data.organizationId == getUserData().organizationId;
+
+      // Instructors can update/lock their own org's tests; Students can update to enroll in joinCode test
+      allow update: if isAuthenticated() && 
+        (resource.data.organizationId == getUserData().organizationId);
+
+      allow delete: if isAuthenticated() && 
+        getUserData().role == 'instructor' && 
+        resource.data.createdBy == request.auth.uid;
+    }
+  }
+}
